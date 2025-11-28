@@ -1,0 +1,2183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NativeFlip 3D - Hardcover Edition</title>
+    
+    <!-- Dependencies -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- Three.js & Plugins -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Tween.js for animation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0f0f0f; color: #fff; font-family: 'Inter', sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; touch-action: none; }
+        .ui-layer { position: absolute; pointer-events: none; z-index: 10; }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        .loader {
+            border: 3px solid #333;
+            border-top: 3px solid #eab308;
+            border-radius: 50%;
+            width: 24px; height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+        
+        .markdown-body h1, .markdown-body h2 { color: #fbbf24; font-weight: bold; margin-bottom: 0.5rem; }
+        .markdown-body p { margin-bottom: 0.75rem; color: #d1d5db; font-size: 0.9rem; }
+        .markdown-body ul { list-style: disc; padding-left: 1rem; color: #d1d5db; }
+        
+        #ai-panel { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); transform: translateX(100%); }
+        #ai-panel.open { transform: translateX(0); }
+        #file-input { display: none; }
+        
+        /* --- IMPROVED TOOLBAR STYLES --- */
+        #annotation-toolbar {
+            transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            background: rgba(15, 15, 15, 0.8);
+            box-shadow: 
+                0 4px 30px rgba(0, 0, 0, 0.5),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+        }
+        
+        .tool-btn { 
+            @apply w-10 h-10 rounded-xl transition-all duration-200 text-neutral-500 relative flex justify-center items-center; 
+        }
+        
+        .tool-btn:hover {
+            @apply text-white bg-white/10 transform scale-105;
+        }
+        
+        .tool-btn.active { 
+            background-color: rgba(251, 191, 36, 0.2) !important;
+            border: 1px solid rgba(251, 191, 36, 0.5);
+            color: #fbbf24 !important;
+            box-shadow: 0 0 15px rgba(251, 191, 36, 0.15);
+        }
+
+        .tool-btn.active i, .tool-btn.active svg {
+            color: #fbbf24 !important;
+            filter: drop-shadow(0 0 2px rgba(251, 191, 36, 0.5));
+        }
+        
+        .tool-btn.active::before {
+            content: '';
+            position: absolute;
+            left: -14px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 60%;
+            background-color: #fbbf24;
+            border-radius: 0 4px 4px 0;
+            box-shadow: 2px 0 8px rgba(251, 191, 36, 0.4);
+        }
+
+        .tool-tooltip {
+            position: absolute;
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%) translateX(10px);
+            background: rgba(0,0,0,0.9);
+            border: 1px solid rgba(255,255,255,0.15);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 500;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.2s ease;
+            margin-left: 12px;
+            z-index: 50;
+        }
+        .tool-btn:hover .tool-tooltip {
+            opacity: 1;
+            transform: translateY(-50%) translateX(0);
+        }
+        
+        #copy-toast { transition: opacity 0.3s ease; }
+        #copy-hover-btn { transition: opacity 0.2s, transform 0.2s; }
+
+        #note-modal { transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out; }
+        #note-modal.hidden { opacity: 0; pointer-events: none; transform: translate(-50%, -45%) scale(0.95); }
+        #note-modal:not(.hidden) { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+        
+        #book-progress { transition: opacity 0.3s ease; }
+        .page-stack {
+            background-color: #e5e5e5;
+            border: 1px solid #a3a3a3;
+            box-shadow: inset 2px 0 4px rgba(0,0,0,0.1);
+            transition: height 0.1s linear;
+            border-radius: 1px 1px 0 0;
+        }
+        .stack-shadow {
+            position: absolute; bottom: -4px; left: 0; width: 100%; height: 4px;
+            background: rgba(0,0,0,0.5); filter: blur(2px); border-radius: 50%;
+        }
+        #progress-canvas {
+            position: absolute; top: -40px; left: 0; width: 100%; height: 80px;
+            pointer-events: none; z-index: 20;
+        }
+        
+        /* --- PROFESSIONAL CENTER BOTTOM BAR --- */
+        .bottom-control-bar {
+            background: rgba(10, 10, 10, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 20px 50px -10px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+            border-radius: 28px;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+            min-width: 320px;
+            transform: translateY(0);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .bottom-control-bar:hover {
+            box-shadow: 0 25px 60px -12px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.08);
+            border-color: rgba(255,255,255,0.12);
+        }
+
+        /* Top Row: Segmented Control (View Modes) */
+        .segment-control {
+            display: flex;
+            background: rgba(255,255,255,0.04);
+            border-radius: 20px;
+            padding: 4px;
+            gap: 4px;
+            width: 100%;
+        }
+
+        .fold-btn {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 16px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #737373;
+            transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .fold-btn i, .fold-btn svg {
+            width: 14px; height: 14px; opacity: 0.7; transition: opacity 0.2s;
+        }
+
+        .fold-btn:hover {
+            color: #d4d4d4;
+            background: rgba(255,255,255,0.03);
+        }
+        
+        .fold-btn:hover i, .fold-btn:hover svg { opacity: 1; }
+
+        .fold-btn.active {
+            background: #262626;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+            font-weight: 600;
+        }
+        
+        .fold-btn.active i, .fold-btn.active svg { opacity: 1; color: #fbbf24; }
+
+        /* Divider */
+        .control-divider {
+            width: 90%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+            margin: 2px 0;
+        }
+
+        /* Bottom Row: Action Modes */
+        .mode-row {
+            display: flex;
+            gap: 6px;
+            width: 100%;
+        }
+
+        .mode-btn {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 0;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #737373;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+            background: transparent;
+        }
+        
+        /* Icon styling inside buttons */
+        .mode-btn i, .mode-btn svg {
+            width: 16px; height: 16px; transition: transform 0.2s ease;
+        }
+
+        .mode-btn:hover {
+            background: rgba(255,255,255,0.03);
+            color: #e5e5e5;
+        }
+        
+        .mode-btn:hover i { transform: scale(1.1); }
+
+        .mode-btn.active {
+            background: rgba(251, 191, 36, 0.15); /* Amber tint */
+            color: #fbbf24;
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            box-shadow: 0 0 20px rgba(251, 191, 36, 0.1), inset 0 0 10px rgba(251, 191, 36, 0.05);
+        }
+        
+        .mode-btn.active i {
+            filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.5));
+        }
+
+        #mode-tooltip {
+            margin-bottom: 12px;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #a3a3a3;
+        }
+
+        /* MAGNIFIER STYLES */
+        #magnifier {
+            position: fixed;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            border: 2px solid rgba(251, 191, 36, 0.6); /* Amber border */
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5), inset 0 0 20px rgba(255,255,255,0.2);
+            pointer-events: none; /* Let clicks pass through */
+            z-index: 9999;
+            overflow: hidden;
+            display: none;
+            background: #000;
+            cursor: none;
+            transform: translate(-50%, -50%); /* Center on cursor */
+        }
+        
+        #magnifier.active {
+            display: block;
+        }
+
+        #magnifier canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Magnifying Glass Element -->
+    <div id="magnifier">
+        <canvas id="mag-canvas" width="440" height="440"></canvas>
+    </div>
+
+    <!-- Top UI Bar -->
+    <div class="ui-layer top-0 left-0 w-full h-20 flex items-center justify-between px-8 bg-gradient-to-b from-black/90 via-black/50 to-transparent pointer-events-auto z-50">
+        <div class="flex items-center gap-3 select-none">
+            <div class="bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
+                <i data-lucide="book" class="text-amber-500 w-5 h-5"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold font-serif tracking-wide text-amber-50 leading-none">Native<span class="text-amber-600">Note</span></h1>
+                <span class="text-[10px] text-neutral-400 font-mono tracking-widest uppercase opacity-70">3D Interactive</span>
+            </div>
+        </div>
+        
+        <!-- Miniature Book Volume Widget -->
+        <div id="book-progress" class="hidden flex flex-col items-center gap-1 group relative" title="Drag to Speed Flip">
+            <canvas id="progress-canvas" width="160" height="80"></canvas>
+            <div class="relative flex items-end gap-1 h-10 w-40">
+                <div class="stack-shadow"></div>
+                <div class="flex-1 flex flex-col justify-end h-full text-right pointer-events-none">
+                      <span id="count-left" class="text-[9px] text-neutral-400 font-mono font-bold mb-1 mr-1 transition-all">0</span>
+                      <div id="stack-left" class="page-stack w-full opacity-0" style="height: 0px; display: none;"></div>
+                      <div class="h-1 w-full bg-amber-900 rounded-sm"></div>
+                </div>
+                <div class="flex flex-col items-center justify-end h-full pb-0 z-10 relative pointer-events-none">
+                    <div class="flex flex-col items-center mb-1 opacity-0 group-hover:opacity-100 transition-opacity absolute -top-24 left-1/2 transform -translate-x-1/2 bg-black/90 px-3 py-2 rounded-lg border border-white/10 w-24 shadow-xl">
+                        <span id="progress-text" class="text-xs text-amber-400 font-bold mb-1">0%</span>
+                        <div class="h-px w-full bg-white/10 mb-1"></div>
+                        <span id="progress-label" class="text-[8px] text-neutral-500 uppercase tracking-widest mb-0.5">TOTAL</span>
+                        <span id="count-total" class="text-[10px] text-white font-bold font-mono">0</span>
+                    </div>
+                    <div class="w-2 h-1 bg-amber-800 rounded-b-md"></div>
+                </div>
+                <div class="flex-1 flex flex-col justify-end h-full text-left pointer-events-none">
+                      <span id="count-right" class="text-[9px] text-neutral-400 font-mono font-bold mb-1 ml-1 transition-all">0</span>
+                      <div id="stack-right" class="page-stack w-full" style="height: 24px;"></div>
+                      <div class="h-1 w-full bg-amber-900 rounded-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+            <button onclick="toggleMagnifier()" id="btn-magnify" class="group flex items-center gap-2 bg-neutral-900/50 hover:bg-neutral-800 text-amber-50 px-4 py-2 rounded-full border border-neutral-700/50 hover:border-amber-500/30 transition-all text-xs font-medium backdrop-blur-md">
+                <i data-lucide="search" class="w-3.5 h-3.5 text-white group-hover:text-amber-200 transition-colors"></i> 
+                <span>Magnify</span>
+            </button>
+            <button onclick="toggleAIPanel()" class="group flex items-center gap-2 bg-neutral-900/50 hover:bg-neutral-800 text-amber-50 px-4 py-2 rounded-full border border-neutral-700/50 hover:border-amber-500/30 transition-all text-xs font-medium backdrop-blur-md">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-yellow-300 group-hover:text-yellow-200 transition-colors"></i> 
+                <span>AI Assist</span>
+            </button>
+            <button onclick="document.getElementById('file-input').click()" class="group flex items-center gap-2 bg-neutral-100 hover:bg-white text-black px-5 py-2 rounded-full transition-all text-xs font-bold shadow-[0_0_20px_-5px_rgba(255,255,255,0.3)] hover:shadow-[0_0_25px_-5px_rgba(255,255,255,0.5)]">
+                <i data-lucide="upload" class="w-3.5 h-3.5 group-hover:-translate-y-0.5 transition-transform"></i> 
+                <span>Open PDF</span>
+            </button>
+            <input type="file" id="file-input" accept="application/pdf" />
+        </div>
+    </div>
+
+    <!-- Vertical Annotation Toolbar -->
+    <div id="annotation-toolbar" class="ui-layer top-1/2 left-8 transform -translate-y-1/2 flex flex-col gap-3 p-3 rounded-[20px] border border-white/10 pointer-events-auto opacity-0 -translate-x-10 pointer-events-none">
+        <button onclick="setDrawingTool('select', null, this)" class="tool-btn active group" id="tool-select">
+            <i data-lucide="mouse-pointer-2" class="w-5 h-5"></i><span class="tool-tooltip">Select Text / Move Notes</span>
+        </button>
+        <div class="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent w-full"></div>
+        <button onclick="setDrawingTool('pen', '#ef4444', this)" class="tool-btn group">
+            <i data-lucide="pen-tool" class="w-5 h-5 text-red-500"></i><span class="tool-tooltip">Red Pen</span>
+        </button>
+        <button onclick="setDrawingTool('pen', '#3b82f6', this)" class="tool-btn group">
+            <i data-lucide="slash" class="w-5 h-5 text-blue-500 transform rotate-[-45deg]"></i><span class="tool-tooltip">Blue Pen</span>
+        </button>
+        <button onclick="setDrawingTool('highlight', '#ffeb3b', this)" class="tool-btn group">
+            <i data-lucide="highlighter" class="w-5 h-5 text-yellow-400"></i><span class="tool-tooltip">Highlighter</span>
+        </button>
+        <button onclick="setDrawingTool('sticky', '#fef3c7', this)" class="tool-btn group">
+            <i data-lucide="sticky-note" class="w-5 h-5 text-amber-200 fill-amber-200/20"></i><span class="tool-tooltip">Sticky Note</span>
+        </button>
+        <button onclick="setDrawingTool('text', '#000000', this)" class="tool-btn group">
+            <i data-lucide="type" class="w-5 h-5 text-purple-400"></i><span class="tool-tooltip">Type Text</span>
+        </button>
+        <button onclick="setDrawingTool('eraser', null, this)" class="tool-btn group">
+            <div class="w-4 h-4 rounded-full border-2 border-neutral-400 group-hover:border-white transition-colors"></div><span class="tool-tooltip">Eraser</span>
+        </button>
+        <div class="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent w-full"></div>
+        <button onclick="undoDraw()" class="tool-btn group">
+            <i data-lucide="undo-2" class="w-5 h-5 text-neutral-400 group-hover:text-white"></i><span class="tool-tooltip">Undo</span>
+        </button>
+        <button onclick="redoDraw()" class="tool-btn group">
+            <i data-lucide="redo-2" class="w-5 h-5 text-neutral-400 group-hover:text-white"></i><span class="tool-tooltip">Redo</span>
+        </button>
+    </div>
+
+    <!-- Modals & Overlays -->
+    <div id="note-modal" class="hidden ui-layer fixed top-1/2 left-1/2 w-80 bg-neutral-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-5 z-[100] flex flex-col gap-3">
+        <div class="flex items-center justify-between border-b border-white/10 pb-2">
+            <h3 class="text-sm font-semibold text-white flex items-center gap-2"><i data-lucide="pen-line" class="w-4 h-4 text-amber-500"></i> Add Note</h3>
+            <button onclick="cancelNote()" class="text-neutral-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <textarea id="note-input" class="w-full h-32 bg-black/50 border border-white/10 rounded-lg p-3 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500/50 resize-none" placeholder="Type your note here..."></textarea>
+        <div class="flex gap-2">
+            <button onclick="cancelNote()" class="flex-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 py-2 rounded-lg text-xs font-medium transition-colors">Cancel</button>
+            <button onclick="confirmAddNote()" class="flex-1 bg-amber-600 hover:bg-amber-500 text-white py-2 rounded-lg text-xs font-medium transition-colors shadow-lg shadow-amber-900/20">Add Note</button>
+        </div>
+    </div>
+
+    <div id="ai-panel" class="ui-layer top-0 right-0 h-full w-96 bg-neutral-900/95 border-l border-white/5 backdrop-blur-2xl shadow-2xl flex flex-col pointer-events-auto pt-20">
+        <div class="flex-1 overflow-y-auto p-6 custom-scrollbar">
+            <div id="ai-intro" class="text-center mt-20 opacity-40">
+                <div class="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/5"><i data-lucide="bot" class="w-8 h-8 text-neutral-400"></i></div>
+                <h3 class="text-sm font-medium text-neutral-300 mb-1">AI Assistant</h3>
+                <p class="text-xs text-neutral-500">Analyze the current page content</p>
+            </div>
+            <div id="ai-output" class="markdown-body hidden text-sm leading-relaxed"></div>
+            <div id="ai-loader" class="hidden flex justify-center py-10"><div class="loader"></div></div>
+        </div>
+        <div class="p-6 border-t border-white/5 bg-black/20">
+            <div class="grid grid-cols-2 gap-2 mb-2">
+                <button onclick="askGemini('summary')" class="bg-white/5 hover:bg-white/10 text-amber-50 py-2.5 rounded-lg text-xs font-medium border border-white/5 transition-all hover:border-amber-500/30">Summarize Page</button>
+                <button onclick="askGemini('quiz')" class="bg-white/5 hover:bg-white/10 text-amber-50 py-2.5 rounded-lg text-xs font-medium border border-white/5 transition-all hover:border-amber-500/30">Generate Quiz</button>
+            </div>
+            <button onclick="askGemini('explain')" class="w-full bg-white/5 hover:bg-white/10 text-amber-50 py-2.5 rounded-lg text-xs font-medium border border-white/5 transition-all hover:border-amber-500/30">Explain Concepts</button>
+        </div>
+    </div>
+
+    <button id="copy-hover-btn" onclick="copySelection()" class="ui-layer fixed bg-neutral-900 text-white px-4 py-2 rounded-xl shadow-2xl border border-white/10 flex items-center gap-2 text-xs font-medium pointer-events-auto opacity-0 pointer-events-none transform -translate-x-1/2 -translate-y-full hover:scale-105 hover:bg-black transition-all z-50">
+        <i data-lucide="copy" class="w-3.5 h-3.5 text-amber-500"></i> Copy Selection
+    </button>
+
+    <div id="copy-toast" class="ui-layer top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/80 backdrop-blur-md px-6 py-3 rounded-full text-white text-sm font-medium opacity-0 pointer-events-none border border-white/10 shadow-2xl">
+        <div class="flex items-center gap-2"><i data-lucide="check-circle" class="w-4 h-4 text-green-500"></i><span>Text Copied to Clipboard</span></div>
+    </div>
+
+    <div id="loading-overlay" class="ui-layer inset-0 flex flex-col items-center justify-center bg-black/90 pointer-events-auto hidden z-[100]">
+        <div class="loader w-10 h-10 border-4 border-t-amber-500 mb-6"></div>
+        <p id="loading-text" class="text-amber-500 font-mono text-sm animate-pulse tracking-widest uppercase">Initializing Environment...</p>
+    </div>
+
+    <div id="empty-state" class="ui-layer inset-0 flex items-center justify-center pointer-events-none">
+        <div class="text-center">
+            <div class="w-24 h-24 bg-white/5 rounded-3xl flex items-center justify-center mx-auto mb-6 border border-white/5 animate-pulse"><i data-lucide="book-open" class="w-10 h-10 text-neutral-600"></i></div>
+            <h2 class="text-4xl font-serif text-white/10 mb-3 tracking-tight">No Book Open</h2>
+            <p class="text-sm text-neutral-600 font-medium">Upload a PDF to generate the immersive 3D model</p>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <!-- NEW: Consolidated Controls -->
+    <div class="ui-layer bottom-8 left-1/2 transform -translate-x-1/2 pointer-events-auto">
+        <div class="flex flex-col items-center gap-2">
+            <div id="mode-tooltip" class="opacity-0 pointer-events-none px-4 py-1.5 rounded-full text-[10px] font-medium tracking-wide border transition-all shadow-lg">
+                View Locked • Drag or Tap Page to Turn
+            </div>
+            
+            <div class="bottom-control-bar">
+                <!-- Fold/Focus Controls (Top Row) -->
+                <div class="segment-control">
+                    <button onclick="setFoldMode('left')" id="btn-fold-left" class="fold-btn" title="Focus Left Page">
+                        <i data-lucide="panel-left-open"></i> Left
+                    </button>
+                    <button onclick="setFoldMode('spread')" id="btn-fold-spread" class="fold-btn active" title="Dual Page View">
+                        <i data-lucide="book-open"></i> Spread
+                    </button>
+                    <button onclick="setFoldMode('right')" id="btn-fold-right" class="fold-btn" title="Focus Right Page">
+                        Right <i data-lucide="panel-right-open"></i>
+                    </button>
+                </div>
+
+                <!-- Divider -->
+                <div class="control-divider"></div>
+
+                <!-- Interaction Mode Controls (Bottom Row) -->
+                <div class="mode-row">
+                    <button onclick="setInteractionMode('view')" id="btn-mode-view" class="mode-btn"><i data-lucide="pen-tool"></i> <span>Annotate</span></button>
+                    <button onclick="setInteractionMode('move')" id="btn-mode-move" class="mode-btn"><i data-lucide="move"></i> <span>Explore</span></button>
+                    <button onclick="setInteractionMode('read')" id="btn-mode-read" class="mode-btn"><i data-lucide="book-open"></i> <span>Read</span></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+        // --- Configuration ---
+        const CONFIG = {
+            bookWidth: 14, bookHeight: 20, maxThickness: 3, 
+            coverThickness: 0.45, 
+            bookGap: 0.02, 
+            spineColor: 0x8b5a2b, // Lighter brown for spine
+            coverColor: 0x8b5a2b, // Lighter brown for cover
+            paperColor: 0xfdfaf7, 
+            edgeColor: 0xffffff, // Pure white for page edges
+            fanningInterval: 30,
+            flipSpeed: 0.06 
+        };
+
+        // --- Globals ---
+        let scene, camera, renderer, controls, bookGroup;
+        let leftWrapper, rightWrapper; 
+        let leftBlock, rightBlock, coverFront, coverBack, spine;
+        let pdfDoc = null, pageCount = 0, currentPage = 1, isFlipping = false;
+        let currentMode = 'view';
+        let isFolded = false; 
+        let dragState = {
+            active: false, startX: 0, progress: 0, direction: 0,
+            flipper: null, geometry: null, geometryBack: null, helperGroup: null,
+            ready: false, pendingCompletion: null
+        };
+        
+        let edgeIndicator; 
+        let isScrubbing = false;
+        let fanningActive = false;
+        let fanningTimer = null;
+        let activeFanningFlips = []; 
+
+        let drawingState = {
+            active: false,
+            tool: 'select', 
+            color: '#000000',
+            lastUV: null,
+            startUV: null, 
+            activePage: null
+        };
+
+        let pendingNote = null; 
+        let pageAnnotations = {}; 
+        let draggingAnnotation = null; 
+
+        let selectionState = {
+            active: false,
+            page: null,
+            startUV: null,
+            currentUV: null,
+            snappedRect: null 
+        };
+        
+        // Magnifier Globals
+        let isMagnifierActive = false;
+        let magMouseX = 0;
+        let magMouseY = 0;
+
+        const drawingHistory = {}; 
+        const textureCache = new Map(); 
+        const basePageCache = new Map(); 
+        const drawingCanvasCache = new Map(); 
+        const textContentCache = new Map(); 
+        let genericPageTexture = null;
+        let matCover, matEdge, matPaper, matBinding;
+
+        // --- Texture Scheduler (Background Loader) ---
+        const TextureScheduler = {
+            queue: [],
+            isProcessing: false,
+            bufferSize: 10,
+            
+            updatePriority: function(current) {
+                if(!pdfDoc) return;
+                const start = Math.max(1, current - this.bufferSize);
+                const end = Math.min(pageCount, current + this.bufferSize);
+                
+                let needed = [];
+                for(let i=start; i<=end; i++) {
+                    // Reverted to simple check: just is it missing?
+                    if(!textureCache.has(i)) {
+                        needed.push({ page: i, dist: Math.abs(current - i) });
+                    }
+                }
+                needed.sort((a,b) => a.dist - b.dist);
+                
+                this.queue = needed.map(n => n.page);
+                this.process();
+            },
+            
+            process: async function() {
+                if(this.isProcessing || this.queue.length === 0) return;
+                this.isProcessing = true;
+                const pageNum = this.queue.shift();
+                
+                try {
+                    if ('requestIdleCallback' in window) {
+                        requestIdleCallback(async () => {
+                            const scale = fanningActive ? 0.5 : 2.0; // Reset to 2.0 default
+                            await getPageTexture(pageNum, scale);
+                            this.isProcessing = false;
+                            this.process(); 
+                        }, { timeout: 1000 });
+                    } else {
+                        setTimeout(async () => {
+                             const scale = fanningActive ? 0.5 : 2.0; // Reset to 2.0 default
+                            await getPageTexture(pageNum, scale);
+                            this.isProcessing = false;
+                            this.process();
+                        }, 10);
+                    }
+                } catch(e) {
+                    console.warn("Preload error", e);
+                    this.isProcessing = false;
+                }
+            }
+        };
+
+        initThreeJS();
+        initScrubbing();
+        createGenericPageTexture(); 
+        animate();
+
+        function initThreeJS() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f0f0f); 
+            scene.fog = new THREE.FogExp2(0x0f0f0f, 0.015);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 30, 20);
+            camera.lookAt(0, 0, 0);
+
+            // Added preserveDrawingBuffer: true to allow reading pixels for magnifier
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = false;
+            controls.enabled = false;
+            controls.target.set(0, 0, 0);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xfffaed, 1);
+            dirLight.position.set(10, 20, 10);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+            const spotLight = new THREE.SpotLight(0xffaa00, 0.5);
+            spotLight.position.set(-10, 10, -5);
+            scene.add(spotLight);
+
+            // Floor Plane
+            const planeGeo = new THREE.PlaneGeometry(200, 200);
+            const planeMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.8, metalness: 0.2 });
+            const plane = new THREE.Mesh(planeGeo, planeMat);
+            plane.rotation.x = -Math.PI / 2;
+            plane.position.y = -CONFIG.coverThickness; 
+            plane.receiveShadow = true;
+            scene.add(plane);
+
+            const textureLoader = new THREE.TextureLoader();
+            const leatherTex = textureLoader.load('https://www.transparenttextures.com/patterns/dark-leather.png');
+            
+            // Updated Material Definitions
+            matCover = new THREE.MeshStandardMaterial({ color: CONFIG.coverColor, roughness: 0.8, map: leatherTex, bumpMap: leatherTex, bumpScale: 0.02 });
+            matEdge = new THREE.MeshStandardMaterial({ color: CONFIG.edgeColor, roughness: 0.2 }); 
+            matPaper = new THREE.MeshStandardMaterial({ color: CONFIG.paperColor, roughness: 0.5 });
+            matBinding = new THREE.MeshStandardMaterial({ color: 0xd6cbbd, roughness: 1.0 });
+
+            window.addEventListener('resize', onWindowResize, false);
+            const canvas = renderer.domElement;
+            canvas.addEventListener('pointerdown', onPointerDown);
+            canvas.addEventListener('pointermove', onPointerMove);
+            canvas.addEventListener('pointerup', onPointerUp);
+            canvas.addEventListener('pointerleave', onPointerUp);
+            
+            // Global mouse tracker for magnifier
+            window.addEventListener('mousemove', (e) => {
+                magMouseX = e.clientX;
+                magMouseY = e.clientY;
+                if(isMagnifierActive) {
+                    const mag = document.getElementById('magnifier');
+                    mag.style.left = magMouseX + 'px';
+                    mag.style.top = magMouseY + 'px';
+                }
+            });
+            
+            window.addEventListener('pointerup', stopFanning);
+        }
+        
+        function toggleMagnifier() {
+            isMagnifierActive = !isMagnifierActive;
+            const mag = document.getElementById('magnifier');
+            const btn = document.getElementById('btn-magnify');
+            // Lucide replaces <i> with <svg>, so we try to find svg first, falling back to i
+            const icon = btn.querySelector('svg') || btn.querySelector('i');
+            
+            if(isMagnifierActive) {
+                mag.classList.add('active');
+                btn.classList.add('bg-neutral-800', 'border-amber-500/50');
+                if(icon) {
+                    icon.classList.add('text-amber-400');
+                    icon.classList.remove('text-white');
+                }
+            } else {
+                mag.classList.remove('active');
+                btn.classList.remove('bg-neutral-800', 'border-amber-500/50');
+                if(icon) {
+                    icon.classList.remove('text-amber-400');
+                    icon.classList.add('text-white');
+                }
+            }
+        }
+
+        function renderMagnifier() {
+            if (!isMagnifierActive) return;
+            const magCanvas = document.getElementById('mag-canvas');
+            const ctx = magCanvas.getContext('2d');
+            const mainCanvas = renderer.domElement;
+            const rect = mainCanvas.getBoundingClientRect();
+            
+            // Calculate position relative to canvas
+            const x = magMouseX - rect.left;
+            const y = magMouseY - rect.top;
+            
+            // Configuration
+            const zoom = 2;
+            const size = 220; // Matches CSS width/height * 2 for retina or just map 1:1
+            // We use a larger canvas internally (440x440) for crisp text on high DPI
+            // but we draw into it.
+            
+            const sourceSize = 110; // The area on screen we want to capture (220 / 2)
+            
+            // Draw from main canvas to magnifier canvas
+            // ctx.drawImage(image, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight);
+            
+            ctx.clearRect(0,0, magCanvas.width, magCanvas.height);
+            
+            // Clamp source area to prevent errors near edges
+            // Note: drawImage handles out of bounds gracefully in modern browsers usually, 
+            // but we want the center.
+            
+            ctx.drawImage(
+                mainCanvas, 
+                x - sourceSize/2, 
+                y - sourceSize/2, 
+                sourceSize, 
+                sourceSize, 
+                0, 
+                0, 
+                magCanvas.width, 
+                magCanvas.height
+            );
+        }
+        
+        // --- NEW SMOOTH FOCUS MODE (Slide & Zoom) ---
+        function setFoldMode(mode) {
+            // Update UI buttons
+            document.querySelectorAll('.fold-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`btn-fold-${mode}`).classList.add('active');
+
+            const dur = 800;
+            const ease = TWEEN.Easing.Cubic.Out;
+
+            if (mode === 'spread') {
+                isFolded = false;
+                // Reset Camera to Spread View (Center)
+                new TWEEN.Tween(controls.target).to({ x: 0, y: 0, z: 0 }, dur).easing(ease).start();
+                new TWEEN.Tween(camera.position).to({ x: 0, y: 30, z: 20 }, dur).easing(ease).start();
+                
+            } else if (mode === 'left') {
+                isFolded = true;
+                // Focus Left Page: Slide Camera Left and Zoom In
+                const targetX = -CONFIG.bookWidth / 4; 
+                new TWEEN.Tween(controls.target).to({ x: targetX, y: 0, z: 0 }, dur).easing(ease).start();
+                new TWEEN.Tween(camera.position).to({ x: targetX, y: 22, z: 5 }, dur).easing(ease).start();
+                
+            } else if (mode === 'right') {
+                isFolded = true;
+                // Focus Right Page: Slide Camera Right and Zoom In
+                const targetX = CONFIG.bookWidth / 4;
+                new TWEEN.Tween(controls.target).to({ x: targetX, y: 0, z: 0 }, dur).easing(ease).start();
+                new TWEEN.Tween(camera.position).to({ x: targetX, y: 22, z: 5 }, dur).easing(ease).start();
+            }
+        }
+        
+        function createGenericPageTexture() {
+            const c = document.createElement('canvas');
+            c.width = 512;
+            c.height = 724;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#fdfaf7';
+            ctx.fillRect(0, 0, 512, 724);
+            
+            ctx.fillStyle = '#d1d5db';
+            for(let i=40; i<700; i+=15) {
+                if(Math.random() > 0.1) {
+                    ctx.fillRect(40, i, Math.random() * 400 + 50, 8);
+                }
+            }
+            genericPageTexture = new THREE.CanvasTexture(c);
+        }
+
+        // --- Speed Flip / Scrubbing Logic ---
+        function initScrubbing() {
+            const widget = document.getElementById('book-progress');
+            
+            widget.addEventListener('pointerdown', (e) => {
+                if (!pdfDoc || isFolded) return; // Disable if folded
+                isScrubbing = true;
+                document.getElementById('progress-label').innerText = "JUMP TO";
+                handleScrub(e);
+                window.addEventListener('pointermove', handleScrub);
+                window.addEventListener('pointerup', stopScrub);
+            });
+        }
+        
+        function startFanning(direction) {
+            if(fanningActive || isFolded) return; 
+            fanningActive = true;
+            spawnFanningPage(direction);
+            
+            fanningTimer = setInterval(() => {
+                if(fanningActive) {
+                    spawnFanningPage(direction);
+                    TextureScheduler.updatePriority(currentPage + (direction * 5));
+                    if (textureCache.has(currentPage)) {
+                        updatePageTextures(); 
+                    }
+                } else {
+                    clearInterval(fanningTimer);
+                }
+            }, CONFIG.fanningInterval);
+        }
+        
+        async function stopFanning() {
+            if(fanningActive) {
+                fanningActive = false;
+                if(fanningTimer) clearInterval(fanningTimer);
+                fanningTimer = null;
+                await updatePageTextures(); 
+                updateBlockThickness();
+                updateReadingProgress();
+                TextureScheduler.updatePriority(currentPage);
+            }
+        }
+        
+        function spawnFanningPage(direction) {
+             const next = currentPage + (direction * 2);
+             if(next < 1 || next > pageCount) {
+                stopFanning();
+                return;
+             }
+             currentPage = next;
+             updateBlockThickness(true); 
+             updateReadingProgress();
+
+             let texFront = genericPageTexture;
+             let texBack = genericPageTexture;
+             
+             const frontPage = direction === 1 ? next - 1 : next;
+             if(textureCache.has(frontPage)) {
+                 texFront = textureCache.get(frontPage);
+             } else {
+                 getPageTexture(frontPage, 0.4); 
+             }
+             
+             const backPage = direction === 1 ? next : next + 1;
+             if(textureCache.has(backPage)) {
+                 texBack = textureCache.get(backPage);
+             } else {
+                 getPageTexture(backPage, 0.4);
+             }
+
+             const res = createFlexiblePage(CONFIG.bookWidth, CONFIG.bookHeight, texFront, texBack);
+             const gapOffset = CONFIG.bookGap / 2;
+             const startH = direction === 1 ? rightBlock.scale.z : leftBlock.scale.z;
+             const zOffset = activeFanningFlips.length * 0.005;
+
+             if (direction === 1) { // Forward
+                 res.group.position.set(gapOffset, 0.02 + zOffset, startH);
+                 deformGeometry(res.geometry, 0, CONFIG.bookWidth);
+                 deformGeometry(res.geometryBack, 0, CONFIG.bookWidth);
+             } else { // Backward
+                 res.group.position.set(-gapOffset, 0.02 + zOffset, startH);
+                 deformGeometry(res.geometry, 1, CONFIG.bookWidth);
+                 deformGeometry(res.geometryBack, 1, CONFIG.bookWidth);
+             }
+             bookGroup.add(res.group);
+
+             const flipObj = {
+                 group: res.group,
+                 geometry: res.geometry,
+                 geometryBack: res.geometryBack,
+                 direction: direction,
+                 progress: 0,
+                 speed: CONFIG.flipSpeed + (Math.random() * 0.01),
+                 startH: startH,
+                 targetH: direction === 1 ? leftBlock.scale.z : rightBlock.scale.z,
+                 cleaningUp: false
+             };
+             activeFanningFlips.push(flipObj);
+        }
+
+        function handleScrub(e) {
+            if(!isScrubbing) return;
+            const widget = document.getElementById('book-progress');
+            const rect = widget.getBoundingClientRect();
+            let x = e.clientX - rect.left;
+            x = Math.max(0, Math.min(x, rect.width));
+            const percent = x / rect.width;
+            let targetPage = Math.max(1, Math.min(pageCount, Math.round(percent * pageCount)));
+            updateReadingProgress(targetPage);
+            const originalPage = currentPage;
+            currentPage = targetPage;
+            updateBlockThickness(); 
+            currentPage = originalPage; 
+        }
+
+        async function stopScrub() {
+            if(!isScrubbing) return;
+            isScrubbing = false;
+            document.getElementById('progress-label').innerText = "TOTAL";
+            window.removeEventListener('pointermove', handleScrub);
+            window.removeEventListener('pointerup', stopScrub);
+            
+            const text = document.getElementById('progress-text').innerText;
+            const percent = parseInt(text.replace('%', ''));
+            let targetPage = Math.max(1, Math.round((percent / 100) * pageCount));
+             if (targetPage % 2 === 0) targetPage += 1;
+             if (targetPage > pageCount) targetPage = pageCount;
+            currentPage = targetPage;
+            updateBlockThickness();
+            await updatePageTextures();
+            TextureScheduler.updatePriority(currentPage);
+        }
+
+        // Removed: createBookEdgeTexture() as it's no longer used for the white edge
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            TWEEN.update(time);
+            controls.update();
+            
+            if (activeFanningFlips.length > 0) {
+                for (let i = activeFanningFlips.length - 1; i >= 0; i--) {
+                    const flip = activeFanningFlips[i];
+                    flip.progress += flip.speed;
+                    
+                    if (flip.progress >= 1) {
+                        if (!flip.cleaningUp) {
+                            flip.cleaningUp = true;
+                            bookGroup.remove(flip.group);
+                            flip.geometry.dispose();
+                            flip.geometryBack.dispose();
+                            flip.group.traverse(c => { if(c.material) c.material.dispose(); });
+                            activeFanningFlips.splice(i, 1);
+                            updateBlockThickness();
+                        }
+                    } else {
+                        let vis = flip.direction === 1 ? flip.progress : (1 - flip.progress);
+                        deformGeometry(flip.geometry, vis, CONFIG.bookWidth);
+                        deformGeometry(flip.geometryBack, vis, CONFIG.bookWidth);
+                        
+                        const startX = CONFIG.bookGap / 2;
+                        const currentX = startX - (CONFIG.bookGap * vis);
+                        const currentH = flip.startH + (flip.targetH - flip.startH) * vis;
+                        
+                        flip.group.position.x = currentX;
+                        flip.group.position.z = currentH + 0.02; 
+                    }
+                }
+            }
+            renderer.render(scene, camera);
+            renderMagnifier(); // Render the magnifier view
+        }
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function setDrawingTool(tool, color = '#000000', element) {
+            if (selectionState.snappedRect || selectionState.active) {
+                const pageToUpdate = selectionState.page;
+                selectionState.active = false;
+                selectionState.snappedRect = null;
+                selectionState.startUV = null;
+                selectionState.currentUV = null;
+                selectionState.page = null;
+                if (pageToUpdate) {
+                    updateTextureComposite(pageToUpdate);
+                }
+                hideCopyButton();
+            }
+            cancelNote();
+            drawingState.tool = tool;
+            drawingState.color = color;
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            const target = element || event.currentTarget;
+            if(target) target.classList.add('active');
+
+            if (tool === 'select') {
+                document.body.style.cursor = 'text'; 
+                document.getElementById('mode-tooltip').innerText = "Select Mode • Drag text to select, click note to move";
+            } else if (tool === 'highlight') {
+                document.body.style.cursor = 'text';
+                document.getElementById('mode-tooltip').innerText = "Highlight Mode • Drag to Highlight Text";
+            } else if (tool === 'text') {
+                document.body.style.cursor = 'text';
+                document.getElementById('mode-tooltip').innerText = "Text Mode • Click to Type";
+            } else if (tool === 'sticky') {
+                document.body.style.cursor = 'copy';
+                document.getElementById('mode-tooltip').innerText = "Sticky Note • Click to Place Note";
+            } else {
+                document.body.style.cursor = 'crosshair';
+                document.getElementById('mode-tooltip').innerText = "Normal Mode • Draw to Annotate";
+            }
+        }
+
+        function getMaterialFromHit(hit) {
+            const mesh = hit.object;
+            if (Array.isArray(mesh.material)) {
+                return mesh.material[hit.face.materialIndex];
+            }
+            return mesh.material;
+        }
+
+        function saveDrawingState(pageNum, canvas) {
+            if (!drawingHistory[pageNum]) {
+                drawingHistory[pageNum] = { past: [], future: [] };
+            }
+            const ctx = canvas.getContext('2d');
+            const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            drawingHistory[pageNum].past.push(data);
+            drawingHistory[pageNum].future = [];
+            if(drawingHistory[pageNum].past.length > 20) drawingHistory[pageNum].past.shift();
+        }
+
+        function undoDraw() {
+            let targetPage = drawingState.activePage || currentPage;
+            if (drawingHistory[targetPage] && drawingHistory[targetPage].past.length > 0) {
+                const history = drawingHistory[targetPage];
+                const drawCanvas = drawingCanvasCache.get(targetPage);
+                if(!drawCanvas) return;
+                const ctx = drawCanvas.getContext('2d');
+                const currentData = ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height);
+                history.future.push(currentData);
+                const previousData = history.past.pop();
+                ctx.putImageData(previousData, 0, 0);
+                updateTextureComposite(targetPage);
+            }
+        }
+
+        function redoDraw() {
+            let targetPage = drawingState.activePage || currentPage;
+            if (drawingHistory[targetPage] && drawingHistory[targetPage].future.length > 0) {
+                const history = drawingHistory[targetPage];
+                const drawCanvas = drawingCanvasCache.get(targetPage);
+                if(!drawCanvas) return;
+                const ctx = drawCanvas.getContext('2d');
+                const currentData = ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height);
+                history.past.push(currentData);
+                const nextData = history.future.pop();
+                ctx.putImageData(nextData, 0, 0);
+                updateTextureComposite(targetPage);
+            }
+        }
+
+        async function ensureTextContent(pageNum) {
+            if (!textContentCache.has(pageNum) && pdfDoc) {
+                const page = await pdfDoc.getPage(pageNum);
+                const content = await page.getTextContent();
+                const viewport = page.getViewport({ scale: 1.0 }); 
+                textContentCache.set(pageNum, { items: content.items, viewport: viewport });
+            }
+        }
+
+        function hitTestAnnotation(pageNum, uv) {
+            if (!pageAnnotations[pageNum]) return null;
+            const base = basePageCache.get(pageNum);
+            if (!base) return null;
+            const w = base.width;
+            const h = base.height;
+            const clickX = uv.x * w;
+            const clickY = (1 - uv.y) * h;
+            for (let i = pageAnnotations[pageNum].length - 1; i >= 0; i--) {
+                const note = pageAnnotations[pageNum][i];
+                const noteX = note.u * w;
+                const noteY = (1 - note.v) * h;
+                const size = 200; 
+                if (clickX >= noteX && clickX <= noteX + size &&
+                    clickY >= noteY && clickY <= noteY + size) {
+                    return note;
+                }
+            }
+            return null;
+        }
+
+        function onPointerDown(e) {
+            if (!bookGroup) return; 
+            if (!document.getElementById('note-modal').classList.contains('hidden')) return;
+            if (e.target.closest('#book-progress')) return;
+            if (e.target.closest('.ui-layer') && !e.target.closest('#canvas-container')) return;
+
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            hideCopyButton();
+
+            if (currentMode === 'view') {
+                const intersects = raycaster.intersectObjects(bookGroup.children, true);
+                if (intersects.length > 0) {
+                    const hit = intersects[0];
+                    if (hit.uv) {
+                        const material = getMaterialFromHit(hit);
+                        if (material.map && (textureCache.has(currentPage) || textureCache.has(currentPage-1))) {
+                            const isRight = hit.object.name.includes('right') || hit.point.x > 0;
+                            const pageNum = isRight ? currentPage : currentPage - 1;
+
+                            if (pageNum >= 1 && pageNum <= pageCount) {
+                                ensureTextContent(pageNum);
+                                if (drawingState.tool === 'select' || drawingState.tool === 'sticky') {
+                                    const hitNote = hitTestAnnotation(pageNum, hit.uv);
+                                    if (hitNote) {
+                                        draggingAnnotation = {
+                                            page: pageNum,
+                                            id: hitNote.id,
+                                            offsetU: hit.uv.x - hitNote.u,
+                                            offsetV: hit.uv.y - hitNote.v
+                                        };
+                                        controls.enabled = false; 
+                                        return;
+                                    }
+                                }
+                                if (drawingState.tool === 'select' || drawingState.tool === 'highlight') {
+                                    selectionState.active = true;
+                                    selectionState.page = pageNum;
+                                    selectionState.startUV = hit.uv;
+                                    selectionState.currentUV = hit.uv;
+                                    selectionState.snappedRect = null;
+                                    updateTextureComposite(pageNum); 
+                                    return; 
+                                }
+                                if (drawingState.tool === 'text' || drawingState.tool === 'sticky') {
+                                    drawingState.lastUV = hit.uv;
+                                    drawingState.activePage = pageNum;
+                                    return; 
+                                }
+                                if (material.map.image && material.map.image.width > 64) {
+                                    drawingState.active = true;
+                                    drawingState.lastUV = hit.uv;
+                                    drawingState.activePage = pageNum;
+                                    if (!drawingCanvasCache.has(pageNum)) {
+                                        const base = basePageCache.get(pageNum);
+                                        if(base) {
+                                            const c = document.createElement('canvas');
+                                            c.width = base.width; c.height = base.height;
+                                            drawingCanvasCache.set(pageNum, c);
+                                        }
+                                    }
+                                    if(drawingCanvasCache.has(pageNum)) {
+                                        saveDrawingState(pageNum, drawingCanvasCache.get(pageNum));
+                                    }
+                                    paintOnTexture(pageNum, hit.uv, true); 
+                                }
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+            
+             if (currentMode === 'read' && !isFlipping && bookGroup && !isFolded) { 
+                const intersects = raycaster.intersectObjects(bookGroup.children, true);
+                if (intersects.length > 0) {
+                    const hit = intersects[0].object;
+                    if (e.ctrlKey && (hit.name.includes('Block') || hit.name.includes('PageSurface'))) {
+                         if (hit.name === 'rightBlock' || hit.name === 'rightPageSurface') {
+                            startFanning(1); 
+                        } else if (hit.name === 'leftBlock' || hit.name === 'leftPageSurface') {
+                            startFanning(-1); 
+                        }
+                        return; 
+                    }
+                    if (hit.name.includes('Block') || hit.name.includes('PageSurface')) {
+                        dragState.active = true;
+                        dragState.startX = e.clientX;
+                        dragState.progress = 0;
+                        dragState.flipper = null;
+                        dragState.ready = false; 
+                        dragState.pendingCompletion = null;
+                        if (hit.name === 'rightBlock' || hit.name === 'rightPageSurface') {
+                            if (currentPage <= pageCount) {
+                                dragState.direction = 1; 
+                                initFlipInteraction(1);
+                            }
+                        } else if (hit.name === 'leftBlock' || hit.name === 'leftPageSurface') {
+                            if (currentPage > 1) {
+                                dragState.direction = -1;
+                                initFlipInteraction(-1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function onPointerMove(e) {
+            if (!bookGroup) return; 
+            if (draggingAnnotation) {
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(bookGroup.children, true);
+                if (intersects.length > 0) {
+                    const hit = intersects[0];
+                    if (hit.uv) {
+                        const isRight = hit.object.name.includes('right') || hit.point.x > 0;
+                        const pageNum = isRight ? currentPage : currentPage - 1;
+                        if (pageNum === draggingAnnotation.page) {
+                            const notes = pageAnnotations[pageNum];
+                            const note = notes.find(n => n.id === draggingAnnotation.id);
+                            if (note) {
+                                note.u = hit.uv.x - draggingAnnotation.offsetU;
+                                note.v = hit.uv.y - draggingAnnotation.offsetV;
+                                updateTextureComposite(pageNum);
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+            if (currentMode === 'view' && selectionState.active) {
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(bookGroup.children, true);
+                if (intersects.length > 0) {
+                    const hit = intersects[0];
+                    if (hit.uv) {
+                        const isRight = hit.object.name.includes('right') || hit.point.x > 0;
+                        const pageNum = isRight ? currentPage : currentPage - 1;
+                        if(pageNum === selectionState.page) {
+                            selectionState.currentUV = hit.uv;
+                            const snapped = getSnappedSelectionRect(pageNum, selectionState.startUV, selectionState.currentUV);
+                            selectionState.snappedRect = snapped;
+                            updateTextureComposite(pageNum); 
+                        }
+                    }
+                }
+                return;
+            }
+            if (currentMode === 'view' && drawingState.active && !['select', 'highlight', 'text', 'sticky'].includes(drawingState.tool)) {
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(bookGroup.children, true);
+                if (intersects.length > 0) {
+                    const hit = intersects[0];
+                    if (hit.uv) {
+                        const isRight = hit.object.name.includes('right') || hit.point.x > 0;
+                        const pageNum = isRight ? currentPage : currentPage - 1;
+                        if (pageNum === drawingState.activePage) {
+                            paintOnTexture(pageNum, hit.uv);
+                            drawingState.lastUV = hit.uv;
+                        }
+                    }
+                }
+                return;
+            }
+             if (currentMode === 'view' && (drawingState.tool === 'select' || drawingState.tool === 'highlight') && !selectionState.active) {
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(bookGroup.children, true);
+                let overPage = false;
+                if(intersects.length > 0) {
+                    const hit = intersects[0];
+                    const mat = getMaterialFromHit(hit);
+                    if(mat && mat.map && mat.map.image && mat.map.image.width > 64) {
+                        overPage = true;
+                    }
+                }
+                document.body.style.cursor = overPage ? 'text' : 'default';
+                return;
+            }
+            if (!dragState.active) return;
+            const sensitivity = 2.0; 
+            const deltaX = (dragState.startX - e.clientX) / window.innerWidth * sensitivity;
+            let rawProgress = deltaX * dragState.direction;
+            dragState.progress = Math.max(0, Math.min(1, rawProgress));
+            if (dragState.ready) {
+                let vis = dragState.direction === 1 ? dragState.progress : (1 - dragState.progress);
+                drawFlipArc(vis, dragState.direction);
+            }
+            if (dragState.ready && dragState.helperGroup) {
+                let visualProgress = dragState.direction === 1 ? dragState.progress : (1 - dragState.progress);
+                deformGeometry(dragState.geometry, visualProgress, CONFIG.bookWidth);
+                deformGeometry(dragState.geometryBack, visualProgress, CONFIG.bookWidth);
+                
+                const startH = rightBlock.scale.z;
+                const endH = leftBlock.scale.z;
+                const currentH = startH + (endH - startH) * visualProgress;
+                dragState.helperGroup.position.z = currentH + 0.02;
+                const startX = CONFIG.bookGap / 2;
+                const currentX = startX - (CONFIG.bookGap * visualProgress);
+                dragState.helperGroup.position.x = currentX;
+                if (edgeIndicator) {
+                    const theta = (Math.PI * visualProgress) - (1 * 0.5 * Math.sin(visualProgress * Math.PI));
+                    const edgeX = CONFIG.bookWidth * Math.cos(theta);
+                    const edgeZ = CONFIG.bookWidth * Math.sin(theta);
+                    edgeIndicator.position.set(edgeX, 0, edgeZ);
+                      if (edgeIndicator.parent !== dragState.helperGroup) {
+                        dragState.helperGroup.add(edgeIndicator);
+                    }
+                }
+            }
+        }
+
+        function onPointerUp(e) {
+            if (!bookGroup) return; 
+            if (draggingAnnotation) {
+                draggingAnnotation = null;
+                return;
+            }
+            if (currentMode === 'view' && (drawingState.tool === 'text' || drawingState.tool === 'sticky') && drawingState.lastUV) {
+                openNoteModal(drawingState.tool);
+                pendingNote = {
+                    page: drawingState.activePage,
+                    uv: drawingState.lastUV,
+                    type: drawingState.tool
+                };
+                drawingState.lastUV = null; 
+                return;
+            }
+            if (currentMode === 'view' && selectionState.active) {
+                selectionState.active = false;
+                if (drawingState.tool === 'highlight' && selectionState.snappedRect) {
+                    bakeHighlightRect(selectionState.page, selectionState.snappedRect);
+                    selectionState.snappedRect = null; 
+                    updateTextureComposite(selectionState.page);
+                } 
+                else if (drawingState.tool === 'select' && selectionState.snappedRect) {
+                    showCopyButton(e.clientX, e.clientY);
+                }
+                return;
+            }
+            if (currentMode === 'view') {
+                drawingState.active = false;
+                drawingState.lastUV = null;
+                return;
+            }
+            if (!dragState.active) return;
+            dragState.active = false;
+            const dist = Math.abs(e.clientX - dragState.startX);
+            const isClick = dist < 10; 
+            const threshold = 0.15;
+            const shouldComplete = isClick || dragState.progress > threshold;
+            if(!dragState.ready) {
+                dragState.pendingCompletion = shouldComplete;
+            } else {
+                finishFlipInteraction(shouldComplete, 600);
+            }
+        }
+
+        function openNoteModal(type) {
+            const modal = document.getElementById('note-modal');
+            const input = document.getElementById('note-input');
+            const title = modal.querySelector('h3');
+            if (type === 'sticky') {
+                title.innerHTML = '<i data-lucide="sticky-note" class="w-4 h-4 text-amber-500"></i> Add Sticky Note';
+                input.placeholder = "Write your note here...";
+            } else {
+                title.innerHTML = '<i data-lucide="type" class="w-4 h-4 text-purple-500"></i> Add Text';
+                input.placeholder = "Type text to place on page...";
+            }
+            input.value = "";
+            modal.classList.remove('hidden');
+            input.focus();
+            lucide.createIcons();
+        }
+
+        function cancelNote() {
+            document.getElementById('note-modal').classList.add('hidden');
+            pendingNote = null;
+        }
+
+        function confirmAddNote() {
+            const input = document.getElementById('note-input');
+            const text = input.value;
+            if (text && text.trim() !== "" && pendingNote) {
+                if (!pageAnnotations[pendingNote.page]) {
+                    pageAnnotations[pendingNote.page] = [];
+                }
+                pageAnnotations[pendingNote.page].push({
+                    id: Date.now(),
+                    type: pendingNote.type,
+                    u: pendingNote.uv.x,
+                    v: pendingNote.uv.y,
+                    text: text
+                });
+                updateTextureComposite(pendingNote.page);
+            }
+            cancelNote();
+        }
+
+        function showCopyButton(x, y) {
+            const btn = document.getElementById('copy-hover-btn');
+            btn.style.left = x + 'px';
+            btn.style.top = (y - 15) + 'px';
+            btn.classList.remove('opacity-0', 'pointer-events-none');
+            btn.classList.add('opacity-100', 'pointer-events-auto');
+        }
+
+        function hideCopyButton() {
+            const btn = document.getElementById('copy-hover-btn');
+            btn.classList.add('opacity-0', 'pointer-events-none');
+            btn.classList.remove('opacity-100', 'pointer-events-auto');
+        }
+
+        function copySelection() {
+            if(selectionState.snappedRect && selectionState.page) {
+                extractSelectedText(selectionState.page, selectionState.startUV, selectionState.currentUV);
+                selectionState.snappedRect = null;
+                updateTextureComposite(selectionState.page);
+                hideCopyButton();
+            }
+        }
+
+        function getSnappedSelectionRect(pageNum, startUV, endUV) {
+            const data = textContentCache.get(pageNum);
+            if (!data) return null; 
+            const { items, viewport } = data;
+            const minX = Math.min(startUV.x, endUV.x);
+            const maxX = Math.max(startUV.x, endUV.x);
+            const minY = Math.min(startUV.y, endUV.y);
+            const maxY = Math.max(startUV.y, endUV.y);
+            const pdfMinX = minX * viewport.width;
+            const pdfMaxX = maxX * viewport.width;
+            const pdfMinY = minY * viewport.height;
+            const pdfMaxY = maxY * viewport.height;
+            let foundText = false;
+            let bounds = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
+            items.forEach(item => {
+                const tx = item.transform[4];
+                const ty = item.transform[5];
+                const fontSize = Math.sqrt(item.transform[0]*item.transform[0] + item.transform[1]*item.transform[1]); 
+                const width = item.width || (item.str.length * fontSize * 0.5); 
+                if (tx + width >= pdfMinX && tx <= pdfMaxX && ty + fontSize >= pdfMinY && ty <= pdfMaxY) {
+                    foundText = true;
+                    bounds.x1 = Math.min(bounds.x1, tx);
+                    bounds.y1 = Math.min(bounds.y1, ty); 
+                    bounds.x2 = Math.max(bounds.x2, tx + width);
+                    bounds.y2 = Math.max(bounds.y2, ty + fontSize); 
+                }
+            });
+            if (!foundText) return null;
+            return {
+                x: bounds.x1 / viewport.width,
+                y: bounds.y1 / viewport.height, 
+                w: (bounds.x2 - bounds.x1) / viewport.width,
+                h: (bounds.y2 - bounds.y1) / viewport.height
+            };
+        }
+        
+        function drawStickyNoteOnCtx(ctx, u, v, text, type) {
+            const x = u * ctx.canvas.width;
+            const y = (1 - v) * ctx.canvas.height; 
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1.0;
+            if (type === 'sticky') {
+                const noteSize = 200; 
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.fillRect(x + 5, y + 5, noteSize, noteSize);
+                ctx.fillStyle = '#fef3c7'; 
+                ctx.fillRect(x, y, noteSize, noteSize);
+                ctx.font = '20px "Comic Sans MS", "Marker Felt", sans-serif';
+                ctx.fillStyle = '#000';
+                ctx.textBaseline = 'top';
+                const words = text.split(' ');
+                let line = '';
+                let lineY = y + 10;
+                const maxWidth = noteSize - 20;
+                for(let n = 0; n < words.length; n++) {
+                    const testLine = line + words[n] + ' ';
+                    const metrics = ctx.measureText(testLine);
+                    if (metrics.width > maxWidth && n > 0) {
+                        ctx.fillText(line, x + 10, lineY);
+                        line = words[n] + ' ';
+                        lineY += 25;
+                    } else {
+                        line = testLine;
+                    }
+                }
+                ctx.fillText(line, x + 10, lineY);
+            } else if (type === 'text') {
+                ctx.font = '24px sans-serif';
+                ctx.fillStyle = '#000000';
+                ctx.fillText(text, x, y);
+            }
+        }
+
+        function paintOnTexture(pageNum, uv, isStart = false) {
+            const canvas = drawingCanvasCache.get(pageNum);
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const x = uv.x * canvas.width;
+            const y = (1 - uv.y) * canvas.height; 
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            if (drawingState.tool === 'eraser') {
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.lineWidth = 30;
+                ctx.globalAlpha = 1.0;
+            } else {
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.strokeStyle = drawingState.color;
+                ctx.lineWidth = 3;
+                ctx.globalAlpha = 1.0;
+            }
+            if (isStart) {
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+            } else if (drawingState.lastUV) {
+                const lastX = drawingState.lastUV.x * canvas.width;
+                const lastY = (1 - drawingState.lastUV.y) * canvas.height;
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            }
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1.0;
+            updateTextureComposite(pageNum);
+        }
+
+        function bakeHighlightRect(pageNum, rect) {
+            if (!drawingCanvasCache.has(pageNum)) {
+                const base = basePageCache.get(pageNum);
+                if(base) {
+                    const c = document.createElement('canvas');
+                    c.width = base.width; c.height = base.height;
+                    drawingCanvasCache.set(pageNum, c);
+                }
+            }
+            const canvas = drawingCanvasCache.get(pageNum);
+            if (!canvas) return;
+            saveDrawingState(pageNum, canvas);
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const drawX = rect.x * w;
+            const drawY = (1 - (rect.y + rect.h)) * h;
+            const drawW = rect.w * w;
+            const drawH = rect.h * h;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.fillStyle = drawingState.color; 
+            ctx.globalAlpha = 0.3; 
+            ctx.fillRect(drawX, drawY, drawW, drawH);
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1.0;
+        }
+
+        async function extractSelectedText(pageNum, startUV, endUV) {
+            if(!pdfDoc) return;
+            const data = textContentCache.get(pageNum);
+            if(!data) return;
+            const { items, viewport } = data;
+            const rect = selectionState.snappedRect;
+            let minX, maxX, minY, maxY;
+            if (rect) {
+                minX = rect.x * viewport.width;
+                maxX = (rect.x + rect.w) * viewport.width;
+                minY = rect.y * viewport.height;
+                maxY = (rect.y + rect.h) * viewport.height;
+            } else {
+                return;
+            }
+            let selectedText = "";
+            const foundItems = [];
+            items.forEach(item => {
+                const tx = item.transform[4];
+                const ty = item.transform[5];
+                if (tx >= minX && tx <= maxX && ty >= minY && ty <= maxY) {
+                    foundItems.push(item);
+                }
+            });
+            foundItems.sort((a, b) => {
+                const yDiff = b.transform[5] - a.transform[5];
+                if (Math.abs(yDiff) > 10) return yDiff; 
+                return a.transform[4] - b.transform[4]; 
+            });
+            selectedText = foundItems.map(i => i.str).join(' ');
+            if (selectedText.trim().length > 0) {
+                const textArea = document.createElement("textarea");
+                textArea.value = selectedText;
+                textArea.style.position = "fixed";  
+                textArea.style.opacity = "0";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    const successful = document.execCommand('copy');
+                    if (successful) {
+                        const toast = document.getElementById('copy-toast');
+                        toast.classList.remove('opacity-0');
+                        setTimeout(() => toast.classList.add('opacity-0'), 2000);
+                    }
+                } catch (err) {}
+                document.body.removeChild(textArea);
+            }
+        }
+        
+        function drawFlipArc(progress, direction) {
+            const canvas = document.getElementById('progress-canvas');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            if (progress <= 0 || progress >= 1) return;
+            const centerX = w / 2;
+            const bottomY = h;
+            const radius = 76; 
+            const angle = -Math.PI * progress; 
+            const x = centerX + radius * Math.cos(angle);
+            const y = bottomY + radius * Math.sin(angle); 
+            ctx.beginPath();
+            ctx.moveTo(centerX, bottomY);
+            ctx.lineTo(x, y);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#fbbf24'; 
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(centerX, bottomY, radius, Math.PI, 0, false);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        function updateReadingProgress(overridePage = null) {
+            if (!pdfDoc) return;
+            const total = pageCount;
+            const current = overridePage !== null ? overridePage : currentPage;
+            const percent = Math.round((current / total) * 100);
+            document.getElementById('book-progress').classList.remove('hidden');
+            const leftPages = current - 1;
+            const rightPages = total - current;
+            document.getElementById('count-left').innerText = leftPages > 0 ? leftPages : "";
+            document.getElementById('count-right').innerText = rightPages > 0 ? rightPages : "";
+            document.getElementById('count-total').innerText = total;
+            document.getElementById('progress-text').innerText = `${percent}%`;
+            const maxH = 24; 
+            let leftH = (current / total) * maxH;
+            let rightH = ((total - current) / total) * maxH;
+            leftH = current === 1 ? 0 : Math.max(2, leftH);
+            rightH = Math.max(2, rightH);
+            const leftStack = document.getElementById('stack-left');
+            leftStack.style.height = `${leftH}px`;
+            if (leftH < 1) {
+                leftStack.style.display = 'none';
+                leftStack.style.opacity = '0';
+            } else {
+                leftStack.style.display = 'block';
+                leftStack.style.opacity = '1';
+            }
+            document.getElementById('stack-right').style.height = `${rightH}px`;
+            document.getElementById('book-progress').title = `Page ${current} of ${total} (${percent}% Read)`;
+            if (!isScrubbing) {
+                const canvas = document.getElementById('progress-canvas');
+                if(canvas) {
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            }
+        }
+
+        // --- IMPROVED TEXTURE COMPOSITING FOR HIGH RES ---
+        function updateTextureComposite(pageNum) {
+            const texture = textureCache.get(pageNum);
+            const baseCanvas = basePageCache.get(pageNum);
+            const drawCanvas = drawingCanvasCache.get(pageNum);
+            
+            if (texture && baseCanvas) {
+                const finalCtx = texture.image.getContext('2d');
+                const w = baseCanvas.width;
+                const h = baseCanvas.height;
+                finalCtx.clearRect(0, 0, w, h);
+                finalCtx.drawImage(baseCanvas, 0, 0);
+                
+                // Scale existing annotations to match new high-res page
+                if(drawCanvas) {
+                    finalCtx.drawImage(drawCanvas, 0, 0, w, h);
+                }
+                
+                if (pageAnnotations[pageNum]) {
+                    pageAnnotations[pageNum].forEach(note => {
+                        drawStickyNoteOnCtx(finalCtx, note.u, note.v, note.text, note.type);
+                    });
+                }
+                
+                if (selectionState.active && selectionState.page === pageNum && selectionState.snappedRect) {
+                    const r = selectionState.snappedRect;
+                    const drawX = r.x * w;
+                    const drawY = (1 - (r.y + r.h)) * h;
+                    const drawW = r.w * w;
+                    const drawH = r.h * h;
+                    if (drawingState.tool === 'highlight') {
+                        finalCtx.fillStyle = 'rgba(255, 235, 59, 0.3)';
+                        finalCtx.fillRect(drawX, drawY, drawW, drawH);
+                    } else {
+                        finalCtx.fillStyle = 'rgba(0, 50, 200, 0.3)';
+                        finalCtx.fillRect(drawX, drawY, drawW, drawH);
+                    }
+                }
+                texture.needsUpdate = true;
+            }
+        }
+
+        function setInteractionMode(mode) {
+            currentMode = mode;
+            const tooltip = document.getElementById('mode-tooltip');
+            const toolbar = document.getElementById('annotation-toolbar');
+            ['view', 'move', 'read'].forEach(m => {
+                const btn = document.getElementById(`btn-mode-${m}`);
+                if (m === mode) {
+                    btn.classList.add('active');
+                    btn.querySelector('span').classList.add('font-semibold');
+                } else {
+                    btn.classList.remove('active');
+                    btn.querySelector('span').classList.remove('font-semibold');
+                }
+            });
+            if (mode === 'view') {
+                controls.enabled = false;
+                tooltip.innerText = "Annotate Mode • Select tool to Draw";
+                document.body.style.cursor = 'default';
+                tooltip.classList.remove('opacity-0', 'pointer-events-none');
+                toolbar.classList.remove('opacity-0', '-translate-x-10', 'pointer-events-none');
+                toolbar.classList.add('opacity-100', 'translate-x-0');
+            } else {
+                toolbar.classList.add('opacity-0', '-translate-x-10', 'pointer-events-none');
+                toolbar.classList.remove('opacity-100', 'translate-x-0');
+                if (mode === 'move') {
+                    controls.enabled = true;
+                    controls.enableRotate = true;
+                    controls.enablePan = true;
+                    controls.enableZoom = true;
+                    tooltip.innerText = "Explore Mode • Right Click to Pan • Scroll to Zoom";
+                    document.body.style.cursor = 'move';
+                    tooltip.classList.remove('opacity-0', 'pointer-events-none');
+                } else if (mode === 'read') {
+                    controls.enabled = false; 
+                    tooltip.innerText = "Read Mode • Drag or Tap Page to Turn";
+                    document.body.style.cursor = 'grab';
+                    tooltip.classList.remove('opacity-0', 'pointer-events-none');
+                }
+            }
+        }
+
+        async function initFlipInteraction(dir, isFast = false) {
+            isFlipping = true;
+            const gapOffset = CONFIG.bookGap / 2;
+            if (!edgeIndicator) {
+                edgeIndicator = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.03, 0.03, CONFIG.bookHeight, 8), 
+                    new THREE.MeshBasicMaterial({ color: 0xffb700, transparent: true, opacity: 0.8 })
+                );
+            }
+            try {
+                const matOptions = { color: CONFIG.paperColor, roughness: 0.5, side: THREE.DoubleSide };
+                const matFront = new THREE.MeshStandardMaterial({ ...matOptions, side: THREE.FrontSide });
+                const matBack = new THREE.MeshStandardMaterial({ ...matOptions, side: THREE.BackSide });
+                const res = createFlexiblePage(CONFIG.bookWidth, CONFIG.bookHeight, null, null);
+                if (isFast && genericPageTexture) {
+                        matFront.map = genericPageTexture;
+                        matBack.map = genericPageTexture;
+                }
+                res.meshFront.material = matFront;
+                res.meshBack.material = matBack;
+                if (dir === 1) { 
+                    res.group.position.set(gapOffset, 0.02, rightBlock.scale.z);
+                    deformGeometry(res.geometry, 0, CONFIG.bookWidth);
+                    deformGeometry(res.geometryBack, 0, CONFIG.bookWidth);
+                } else {
+                    res.group.position.set(-gapOffset, 0.02, leftBlock.scale.z);
+                    deformGeometry(res.geometry, 1, CONFIG.bookWidth);
+                    deformGeometry(res.geometryBack, 1, CONFIG.bookWidth);
+                }
+                bookGroup.add(res.group);
+                dragState.helperGroup = res.group;
+                dragState.geometry = res.geometry;
+                dragState.geometryBack = res.geometryBack;
+                dragState.ready = true; 
+                let texFront, texBack, texUnder;
+                if (dir === 1) {
+                    let p1, p2;
+                    if(isFast) {
+                          p1 = textureCache.has(currentPage) ? Promise.resolve(textureCache.get(currentPage)) : Promise.resolve(genericPageTexture);
+                          p2 = textureCache.has(currentPage + 1) ? Promise.resolve(textureCache.get(currentPage + 1)) : Promise.resolve(genericPageTexture);
+                    } else {
+                          p1 = getPageTexture(currentPage);
+                          p2 = getPageTexture(currentPage + 1);
+                    }
+                    const nextUnderId = currentPage + 2 <= pageCount ? currentPage + 2 : null;
+                    const p3 = nextUnderId ? getPageTexture(nextUnderId) : Promise.resolve(null);
+                    p3.then(tex => {
+                        const matUnder = new THREE.MeshStandardMaterial({ color: 0xffffff, map: tex, roughness: 0.5 });
+                        rightBlock.material = [matEdge, matBinding, matEdge, matEdge, matUnder, matEdge];
+                    });
+                    Promise.all([p1, p2]).then(([tf, tb]) => {
+                        if(dragState.helperGroup) {
+                            res.meshFront.material.map = tf;
+                            res.meshFront.material.needsUpdate = true;
+                            res.meshBack.material.map = tb;
+                            res.meshBack.material.needsUpdate = true;
+                        }
+                    });
+                } else {
+                    let p1, p2;
+                    if(isFast) {
+                          p1 = textureCache.has(currentPage - 1) ? Promise.resolve(textureCache.get(currentPage - 1)) : Promise.resolve(genericPageTexture);
+                          p2 = textureCache.has(currentPage - 2) ? Promise.resolve(textureCache.get(currentPage - 2)) : Promise.resolve(genericPageTexture);
+                    } else {
+                          p1 = getPageTexture(currentPage - 1);
+                          p2 = getPageTexture(currentPage - 2);
+                    }
+                    const prevUnderId = currentPage - 3 >= 1 ? currentPage - 3 : null;
+                    const p3 = prevUnderId ? getPageTexture(prevUnderId) : Promise.resolve(null);
+                    p3.then(tex => {
+                          const matUnder = new THREE.MeshStandardMaterial({ color: 0xffffff, map: tex, roughness: 0.5 });
+                        leftBlock.material = [matEdge, matBinding, matEdge, matEdge, matEdge, matUnder];
+                    });
+                    Promise.all([p1, p2]).then(([tf, tb]) => {
+                        if(dragState.helperGroup) {
+                             res.meshFront.material.map = tb; 
+                             res.meshFront.material.needsUpdate = true;
+                             res.meshBack.material.map = tf; 
+                             res.meshBack.material.needsUpdate = true;
+                        }
+                    });
+                }
+                if(dragState.pendingCompletion !== null) finishFlipInteraction(dragState.pendingCompletion);
+            } catch (err) {
+                console.error("Flip init failed", err);
+                isFlipping = false;
+                dragState.active = false;
+            }
+        }
+
+        function finishFlipInteraction(complete, duration = 600, onCompleteCallback = null) {
+            if (!dragState.helperGroup) {
+                isFlipping = false;
+                if(onCompleteCallback) onCompleteCallback();
+                return;
+            }
+            const startP = dragState.active ? dragState.progress : (dragState.progress || 0);
+            const endP = complete ? 1 : 0;
+            const anim = { p: startP };
+            const startH = rightBlock.scale.z;
+            const endH = leftBlock.scale.z;
+            const startX = CONFIG.bookGap / 2;
+            new TWEEN.Tween(anim)
+                .to({ p: endP }, duration)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .onUpdate(() => {
+                    let vis = dragState.direction === 1 ? anim.p : (1 - anim.p);
+                    drawFlipArc(vis, dragState.direction);
+                    if(dragState.geometry && dragState.helperGroup) {
+                        deformGeometry(dragState.geometry, vis, CONFIG.bookWidth);
+                        deformGeometry(dragState.geometryBack, vis, CONFIG.bookWidth);
+                        const currentH = startH + (endH - startH) * vis;
+                        dragState.helperGroup.position.z = currentH + 0.02;
+                        const currentX = startX - (CONFIG.bookGap * vis);
+                        dragState.helperGroup.position.x = currentX;
+                        if (edgeIndicator) {
+                            const theta = (Math.PI * vis) - (1 * 0.5 * Math.sin(vis * Math.PI));
+                            const edgeX = CONFIG.bookWidth * Math.cos(theta);
+                            const edgeZ = CONFIG.bookWidth * Math.sin(theta);
+                            edgeIndicator.position.set(edgeX, 0, edgeZ);
+                             if (edgeIndicator.parent !== dragState.helperGroup) {
+                                dragState.helperGroup.add(edgeIndicator);
+                            }
+                        }
+                    }
+                })
+                .onComplete(async () => {
+                    try {
+                        if (complete) {
+                            currentPage += (dragState.direction * 2);
+                        }
+                        await updatePageTextures();
+                        updateBlockThickness();
+                        updateReadingProgress();
+                        preloadAdjacentPages();
+                        TextureScheduler.updatePriority(currentPage);
+                    } catch(e) {
+                        console.error("Error during flip finalization", e);
+                    } finally {
+                        if(dragState.helperGroup) {
+                            if (edgeIndicator && edgeIndicator.parent === dragState.helperGroup) {
+                                dragState.helperGroup.remove(edgeIndicator);
+                            }
+                            if (dragState.helperGroup.parent) {
+                                dragState.helperGroup.parent.remove(dragState.helperGroup);
+                            }
+                            if(dragState.geometry) dragState.geometry.dispose();
+                            if(dragState.geometryBack) dragState.geometryBack.dispose();
+                            dragState.helperGroup.children.forEach(c => {
+                                if(c.material) c.material.dispose();
+                            });
+                            dragState.helperGroup = null;
+                        }
+                        isFlipping = false;
+                        dragState.ready = false;
+                        dragState.pendingCompletion = null;
+                        if(onCompleteCallback) onCompleteCallback();
+                    }
+                })
+                .start();
+        }
+
+        function deformGeometry(geometry, progress, width) {
+            if(!geometry || !geometry.attributes) return;
+            const positions = geometry.attributes.position;
+            const originalPositions = geometry.userData.originalPositions;
+            const intensity = 0.5; 
+            for (let i = 0; i < originalPositions.length; i++) {
+                const orig = originalPositions[i];
+                const r = orig.x / width;
+                const theta = (Math.PI * progress) - (r * intensity * Math.sin(progress * Math.PI));
+                positions.setXYZ(i, orig.x * Math.cos(theta), orig.y, orig.x * Math.sin(theta));
+            }
+            positions.needsUpdate = true;
+            geometry.computeVertexNormals();
+        }
+
+        function createFlexiblePage(width, height, textureFront, textureBack) {
+            const segments = 50; 
+            const geometry = new THREE.PlaneGeometry(width, height, segments, 1);
+            geometry.translate(width / 2, 0, 0);
+            const matOptions = { color: 0xffffff, depthTest: false, transparent: false };
+            const posAttribute = geometry.attributes.position;
+            const originalPositions = [];
+            for (let i = 0; i < posAttribute.count; i++) {
+                originalPositions.push(new THREE.Vector3().fromBufferAttribute(posAttribute, i));
+            }
+            geometry.userData.originalPositions = originalPositions;
+            const matFront = new THREE.MeshStandardMaterial({ map: textureFront, ...matOptions, side: THREE.FrontSide });
+            const meshFront = new THREE.Mesh(geometry, matFront);
+            meshFront.renderOrder = 999; 
+            meshFront.position.z = 0.01;
+            meshFront.frustumCulled = false; 
+            const geometryBack = geometry.clone();
+            const uvAttribute = geometryBack.attributes.uv;
+            for ( let i = 0; i < uvAttribute.count; i ++ ) uvAttribute.setX( i, 1 - uvAttribute.getX( i ) );
+            geometryBack.userData.originalPositions = originalPositions;
+            const matBack = new THREE.MeshStandardMaterial({ map: textureBack, ...matOptions, side: THREE.BackSide });
+            const meshBack = new THREE.Mesh(geometryBack, matBack);
+            meshBack.renderOrder = 999; 
+            meshBack.position.z = -0.01;
+            meshBack.frustumCulled = false;
+            const group = new THREE.Group();
+            group.add(meshFront);
+            group.add(meshBack);
+            return { group, geometry, geometryBack, meshFront, meshBack };
+        }
+
+        async function buildBookStructure() {
+            if(bookGroup) { scene.remove(bookGroup); bookGroup = null; }
+            bookGroup = new THREE.Group();
+            scene.add(bookGroup);
+            const bw = CONFIG.bookWidth;
+            const bh = CONFIG.bookHeight;
+            const ct = CONFIG.coverThickness;
+            const gap = CONFIG.bookGap;
+            const gapOffset = gap / 2;
+            const maxThick = Math.min(CONFIG.maxThickness, pageCount * 0.01); 
+            CONFIG.currentMaxThickness = maxThick;
+            const coverW = bw + 0.8; 
+            const coverH = bh + 0.8;
+            const spineRadius = Math.max(gap + 0.5, 0.6) / 2; 
+            const spineGeo = new THREE.CylinderGeometry(spineRadius, spineRadius, coverH, 32, 1, true, Math.PI, Math.PI); 
+            spine = new THREE.Mesh(spineGeo, matCover);
+            spine.rotation.x = -Math.PI / 2;
+            spine.rotation.z = -Math.PI / 2;
+            spine.position.set(0, 0, -ct/2 - 0.02); 
+            spine.castShadow = true;
+            bookGroup.add(spine);
+            const coverGeo = new THREE.BoxGeometry(coverW, coverH, ct);
+            coverBack = new THREE.Mesh(coverGeo, matCover);
+            coverBack.position.set(gapOffset + bw/2, 0, -ct/2); 
+            coverBack.receiveShadow = true;
+            bookGroup.add(coverBack);
+            coverFront = new THREE.Mesh(coverGeo, matCover);
+            coverFront.position.set(-(gapOffset + bw/2), 0, -ct/2); 
+            coverFront.receiveShadow = true;
+            bookGroup.add(coverFront);
+            const blockGeo = new THREE.BoxGeometry(bw, bh, 1); 
+            blockGeo.translate(bw/2, 0, 0.5); 
+            const leftGeo = blockGeo.clone(); 
+            leftGeo.translate(0, 0, -1); 
+            leftBlock = new THREE.Mesh(leftGeo, [matEdge, matBinding, matEdge, matEdge, matEdge, matPaper]);
+            leftBlock.name = 'leftBlock';
+            leftBlock.rotation.y = Math.PI; 
+            leftBlock.position.set(-gapOffset, 0, 0); 
+            leftBlock.castShadow = true;
+            bookGroup.add(leftBlock);
+            rightBlock = new THREE.Mesh(blockGeo, [matEdge, matBinding, matPaper, matEdge, matEdge, matEdge]);
+            rightBlock.name = 'rightBlock';
+            rightBlock.position.set(gapOffset, 0, 0); 
+            rightBlock.castShadow = true;
+            bookGroup.add(rightBlock);
+            bookGroup.rotation.x = -Math.PI / 2;
+            updateBlockThickness();
+            await updatePageTextures();
+            updateReadingProgress(); 
+            preloadAdjacentPages(); 
+            TextureScheduler.updatePriority(currentPage);
+            bookGroup.scale.set(0,0,0);
+            new TWEEN.Tween(bookGroup.scale)
+                .to({x:1, y:1, z:1}, 1000)
+                .easing(TWEEN.Easing.Elastic.Out)
+                .start();
+        }
+
+        function updateBlockThickness(partial = false) {
+            const totalH = CONFIG.currentMaxThickness;
+            const progress = (currentPage - 1) / pageCount;
+            const hLeft = Math.max(0.02, totalH * progress);
+            const hRight = Math.max(0.02, totalH * (1 - progress));
+            if (partial) {
+                if (fanningActive) { 
+                    leftBlock.scale.z = hLeft;
+                    rightBlock.scale.z = hRight;
+                }
+            } else {
+                leftBlock.scale.z = hLeft;
+                rightBlock.scale.z = hRight;
+            }
+        }
+
+        async function updatePageTextures() {
+            const texLeft = await getPageTexture(currentPage - 1);
+            const texRight = await getPageTexture(currentPage);
+            const matLeft = new THREE.MeshStandardMaterial({ color: 0xffffff, map: texLeft, roughness: 0.5 });
+            const matRight = new THREE.MeshStandardMaterial({ color: 0xffffff, map: texRight, roughness: 0.5 });
+            leftBlock.material = [matEdge, matBinding, matEdge, matEdge, matEdge, matLeft];
+            rightBlock.material = [matEdge, matBinding, matEdge, matEdge, matRight, matEdge];
+        }
+
+        document.getElementById('file-input').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file || file.type !== 'application/pdf') return;
+            document.getElementById('empty-state').style.display = 'none';
+            document.getElementById('loading-overlay').style.display = 'flex';
+            try {
+                const buffer = await file.arrayBuffer();
+                pdfDoc = await pdfjsLib.getDocument(buffer).promise;
+                pageCount = pdfDoc.numPages;
+                currentPage = 1;
+                await buildBookStructure();
+            } catch (err) {
+                console.error(err);
+                alert("Error reading PDF");
+            } finally {
+                document.getElementById('loading-overlay').style.display = 'none';
+            }
+        });
+
+        function preloadAdjacentPages() {
+            const range = 2;
+            for(let i = 1; i <= range; i++) {
+                const fwdPage = currentPage + i;
+                const fwdNext = fwdPage + 1;
+                if(fwdPage <= pageCount) getPageTexture(fwdPage);
+                if(fwdNext <= pageCount) getPageTexture(fwdNext);
+                const backPage = currentPage - i;
+                const backPrev = backPage - 1;
+                if(backPage >= 1) getPageTexture(backPage);
+                if(backPrev >= 1) getPageTexture(backPrev);
+            }
+        }
+
+        // --- IMPROVED TEXTURE GENERATION ---
+        // Defaults to scale 4.0 for crisper text on modern displays
+        async function getPageTexture(num, scale = 1.0) { 
+            if (!pdfDoc || num < 1 || num > pageCount) return null; 
+            
+            // CACHE INVALIDATION LOGIC:
+            // If the cached texture is lower quality than what we want, re-render it.
+            if (textureCache.has(num)) {
+               return textureCache.get(num);
+            }
+            
+            const page = await pdfDoc.getPage(num);
+            const viewport = page.getViewport({ scale: scale }); 
+            const baseCanvas = document.createElement('canvas');
+            const context = baseCanvas.getContext('2d');
+            baseCanvas.width = viewport.width;
+            baseCanvas.height = viewport.height;
+            await page.render({ canvasContext: context, viewport: viewport }).promise;
+            
+            basePageCache.set(num, baseCanvas);
+            
+            const finalCanvas = document.createElement('canvas');
+            finalCanvas.width = baseCanvas.width;
+            finalCanvas.height = baseCanvas.height;
+            const finalCtx = finalCanvas.getContext('2d');
+            finalCtx.drawImage(baseCanvas, 0, 0);
+            
+            // If we have drawings on the old low-res canvas, scale them up to fit the new high-res page
+            if (drawingCanvasCache.has(num)) {
+                const drawCanvas = drawingCanvasCache.get(num);
+                finalCtx.drawImage(drawCanvas, 0, 0, finalCanvas.width, finalCanvas.height);
+            }
+            
+            const texture = new THREE.CanvasTexture(finalCanvas);
+            texture.encoding = THREE.sRGBEncoding;
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter; 
+            
+            // Enable Anisotropic Filtering for sharp text at oblique angles
+            const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+            texture.anisotropy = maxAnisotropy;
+
+            // Dispose old texture to free memory
+            if (textureCache.has(num)) {
+                const old = textureCache.get(num);
+                old.dispose();
+            }
+
+            textureCache.set(num, texture);
+            return texture;
+        }
+
+        const apiKey = ""; 
+
+        async function askGemini(mode) {
+            if(!pdfDoc) return;
+            const panel = document.getElementById('ai-panel');
+            if(!panel.classList.contains('open')) toggleAIPanel();
+            document.getElementById('ai-intro').classList.add('hidden');
+            document.getElementById('ai-output').classList.add('hidden');
+            document.getElementById('ai-loader').classList.remove('hidden');
+            try {
+                const page = await pdfDoc.getPage(currentPage);
+                const textContent = await page.getTextContent();
+                const text = textContent.items.map(item => item.str).join(' ');
+                if(text.length < 20) throw new Error("Not enough text on page.");
+                let prompt = "";
+                if(mode === 'summary') prompt = "Summarize this page:\n" + text;
+                else if(mode === 'quiz') prompt = "Create a short quiz based on this:\n" + text;
+                else if(mode === 'explain') prompt = "Explain key concepts:\n" + text;
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const data = await response.json();
+                const md = data.candidates?.[0]?.content?.parts?.[0]?.text || "Error generating response.";
+                document.getElementById('ai-output').innerHTML = marked.parse(md);
+                document.getElementById('ai-output').classList.remove('hidden');
+            } catch(e) {
+                document.getElementById('ai-output').innerHTML = `<span class="text-red-400">${e.message}</span>`;
+                document.getElementById('ai-output').classList.remove('hidden');
+            } finally {
+                document.getElementById('ai-loader').classList.add('hidden');
+            }
+        }
+
+        function toggleAIPanel() {
+            document.getElementById('ai-panel').classList.toggle('open');
+        }
+        
+        setInteractionMode('view');
+    </script>
+</body>
+</html>
