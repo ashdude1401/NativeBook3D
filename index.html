@@ -308,7 +308,7 @@
                 <i data-lucide="book" class="text-amber-500 w-5 h-5"></i>
             </div>
             <div>
-                <h1 class="text-lg font-bold font-serif tracking-wide text-amber-50 leading-none">Native<span class="text-amber-600">Note</span></h1>
+                <h1 class="text-lg font-bold font-serif tracking-wide text-amber-5 leading-none">Native<span class="text-amber-600">Note</span></h1>
                 <span class="text-[10px] text-neutral-400 font-mono tracking-widest uppercase opacity-70">3D Interactive</span>
             </div>
         </div>
@@ -448,8 +448,9 @@
     <!-- NEW: Consolidated Controls -->
     <div class="ui-layer bottom-8 left-1/2 transform -translate-x-1/2 pointer-events-auto">
         <div class="flex flex-col items-center gap-2">
-            <div id="mode-tooltip" class="opacity-0 pointer-events-none px-4 py-1.5 rounded-full text-[10px] font-medium tracking-wide border transition-all shadow-lg">
-                View Locked • Drag or Tap Page to Turn
+            <!-- REPLACED: Updated styling to look like a HUD/Tooltip instead of buttons -->
+            <div id="control-hints" class="opacity-0 pointer-events-none select-none flex items-center gap-3 px-4 py-2 rounded-full bg-black/60 backdrop-blur-md border border-white/5 transition-all duration-300 transform translate-y-2 mb-3 shadow-lg z-[60]">
+                <!-- Content injected via JS -->
             </div>
             
             <div class="bottom-control-bar">
@@ -808,7 +809,7 @@
         }
         
         function startFanning(direction) {
-            if(fanningActive || isFolded) return; 
+            if(fanningActive) return; // Removed isFolded check to allow flipping in focused mode
             fanningActive = true;
             spawnFanningPage(direction);
             
@@ -1169,7 +1170,8 @@
                 return;
             }
             
-             if (currentMode === 'read' && !isFlipping && bookGroup && !isFolded) { 
+             // Removed isFolded check here to allow interaction in focused modes
+             if (currentMode === 'read' && !isFlipping && bookGroup) { 
                 const intersects = raycaster.intersectObjects(bookGroup.children, true);
                 if (intersects.length > 0) {
                     const hit = intersects[0].object;
@@ -1723,8 +1725,10 @@
 
         function setInteractionMode(mode) {
             currentMode = mode;
-            const tooltip = document.getElementById('mode-tooltip');
+            // Updated to target the new control-hints container
+            const hints = document.getElementById('control-hints');
             const toolbar = document.getElementById('annotation-toolbar');
+            
             ['view', 'move', 'read'].forEach(m => {
                 const btn = document.getElementById(`btn-mode-${m}`);
                 if (m === mode) {
@@ -1735,31 +1739,156 @@
                     btn.querySelector('span').classList.remove('font-semibold');
                 }
             });
+            
+            // Default configuration
+            controls.enableRotate = true;
+            controls.enableZoom = true;
+            controls.enablePan = true;
+            controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+            controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+
+            // Helper to generate hint HTML with Tooltip
+            const createHint = (icon, text, detail) => `
+                <div class="group relative flex items-center gap-1.5 text-[10px] font-medium text-neutral-400 tracking-wide uppercase cursor-help hover:text-white transition-colors">
+                    <i data-lucide="${icon}" class="w-3 h-3 text-amber-500/80"></i>
+                    <span>${text}</span>
+                    
+                    <!-- Tooltip -->
+                    <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 px-3 py-1.5 bg-neutral-900/95 border border-white/10 rounded-lg text-[10px] text-neutral-300 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none shadow-xl transform translate-y-1 group-hover:translate-y-0 z-50">
+                        ${detail}
+                        <div class="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-neutral-900 border-b border-r border-white/10 transform rotate-45"></div>
+                    </div>
+                </div>
+            `;
+            // Dot separator
+            const separator = `<div class="w-1 h-1 rounded-full bg-white/20"></div>`;
+
             if (mode === 'view') {
                 controls.enabled = false;
-                tooltip.innerText = "Annotate Mode • Select tool to Draw";
+                
+                // Visual Hints for View Mode
+                hints.innerHTML = `
+                    ${createHint('mouse-pointer-2', 'Select', 'Click & Drag to select text')}
+                    ${separator}
+                    ${createHint('pen-tool', 'Draw', 'Select a tool from the left bar')}
+                    ${separator}
+                    ${createHint('sticky-note', 'Notes', 'Click "Sticky Note" then click page')}
+                `;
+                
                 document.body.style.cursor = 'default';
-                tooltip.classList.remove('opacity-0', 'pointer-events-none');
+                hints.classList.remove('opacity-0', 'translate-y-2', 'pointer-events-none');
                 toolbar.classList.remove('opacity-0', '-translate-x-10', 'pointer-events-none');
                 toolbar.classList.add('opacity-100', 'translate-x-0');
             } else {
                 toolbar.classList.add('opacity-0', '-translate-x-10', 'pointer-events-none');
                 toolbar.classList.remove('opacity-100', 'translate-x-0');
+                
                 if (mode === 'move') {
                     controls.enabled = true;
-                    controls.enableRotate = true;
-                    controls.enablePan = true;
-                    controls.enableZoom = true;
-                    tooltip.innerText = "Explore Mode • Right Click to Pan • Scroll to Zoom";
+                    
+                    // Visual Hints for Move Mode
+                    hints.innerHTML = `
+                        ${createHint('move', 'Pan', 'Right-Click + Drag or Arrow Keys')}
+                        ${separator}
+                        ${createHint('rotate-3d', 'Rotate', 'Left-Click + Drag')}
+                        ${separator}
+                        ${createHint('zoom-in', 'Zoom', 'Scroll Wheel or +/- Keys')}
+                    `;
+                    
                     document.body.style.cursor = 'move';
-                    tooltip.classList.remove('opacity-0', 'pointer-events-none');
+                    hints.classList.remove('opacity-0', 'translate-y-2', 'pointer-events-none');
                 } else if (mode === 'read') {
-                    controls.enabled = false; 
-                    tooltip.innerText = "Read Mode • Drag or Tap Page to Turn";
+                    controls.enabled = true; 
+                    controls.enableRotate = false; 
+                    controls.enableZoom = true;
+                    controls.enablePan = true;
+                    
+                    // Visual Hints for Read Mode
+                    hints.innerHTML = `
+                        ${createHint('hand', 'Flip', 'Drag page corner to flip')}
+                        ${separator}
+                        ${createHint('layers', 'Speed Flip', 'Ctrl + Click deck to fast flip')}
+                        ${separator}
+                        ${createHint('move', 'Pan', 'Right-Click + Drag or Arrow Keys')}
+                        ${separator}
+                        ${createHint('zoom-in', 'Zoom', 'Scroll Wheel or +/- Keys')}
+                    `;
+                    
                     document.body.style.cursor = 'grab';
-                    tooltip.classList.remove('opacity-0', 'pointer-events-none');
+                    hints.classList.remove('opacity-0', 'translate-y-2', 'pointer-events-none');
                 }
             }
+            // Re-initialize icons for the newly injected HTML
+            lucide.createIcons();
+        }
+
+        // --- KEYBOARD CONTROLS ---
+        window.addEventListener('keydown', (e) => {
+            // Ignore if typing in an input (like Note Modal or AI Chat)
+            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+            
+            // Only active in Read or Explore modes
+            if (currentMode !== 'read' && currentMode !== 'move') return;
+            
+            // Adjust pan speed based on zoom level (closer = slower/more precise)
+            const dist = camera.position.distanceTo(controls.target);
+            const zoomFactor = Math.max(0.2, dist / 20);
+            const panSpeed = 0.5 * zoomFactor;
+            const zoomSpeed = 1.0;
+
+            switch(e.key) {
+                case 'ArrowUp':
+                case 'w':
+                case 'W':
+                    panCamera(0, -panSpeed);
+                    break;
+                case 'ArrowDown':
+                case 's':
+                case 'S':
+                    panCamera(0, panSpeed);
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                case 'A':
+                    panCamera(-panSpeed, 0);
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                case 'D':
+                    panCamera(panSpeed, 0);
+                    break;
+                case '+':
+                case '=':
+                    zoomCamera(zoomSpeed); // Zoom In
+                    break;
+                case '-':
+                case '_':
+                    zoomCamera(-zoomSpeed); // Zoom Out
+                    break;
+            }
+        });
+
+        function panCamera(dx, dy) {
+            // Translate camera and target flatly on X/Z plane
+            controls.target.x += dx;
+            controls.target.z += dy;
+            camera.position.x += dx;
+            camera.position.z += dy;
+            controls.update();
+        }
+
+        function zoomCamera(amount) {
+            // amount > 0 means Zoom In (get closer), amount < 0 means Zoom Out
+            const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+            const dist = offset.length();
+            
+            // Limit zoom distance (min 2, max 50)
+            let newDist = dist - amount;
+            newDist = Math.max(2, Math.min(newDist, 50)); 
+            
+            offset.setLength(newDist);
+            camera.position.copy(controls.target).add(offset);
+            controls.update();
         }
 
         async function initFlipInteraction(dir, isFast = false) {
